@@ -103,13 +103,111 @@ The Resume Builder combines `@uiw/react-md-editor` for robust markdown parsing w
 
 ---
 
-## Database Schema Highlights
+## Entity-Relationship (ER) Model & Database Architecture
 
-The database is architected to support complex querying for user analytics and AI context injection. Notable design decisions include:
+The WorkWise database architecture is built on **PostgreSQL** managed through **Prisma ORM**. It balances relational normalization with semi-structured JSON storage to efficiently serve real-time dashboard analytics, track interview progress, and supply rich context to the Generative AI engine.
 
-- **IndustryInsight Entity:** Acts as a centralized analytics hub utilizing Prisma's `Json[]` fields to store complex, deeply nested objects like `salaryRanges` `{ role, min, max, median }` without requiring excessive relational joins.
-- **Assessment Entity:** Maintains immutable historical logs of user performance, tracking AI-generated `improvementTips` to feed back into the Generative AI context window for future interactions.
-- **Relational Integrity:** Strict foreign key constraints bind user profiles to their respective Markdown `Resume` and `CoverLetter` artifacts, ensuring data cascading and isolation.
+### ER Model Diagram
+
+```mermaid
+erDiagram
+    IndustryInsight ||--o{ User : "categorizes"
+    User ||--o{ Assessment : "takes"
+    User ||--|| Resume : "owns"
+    User ||--o{ CoverLetter : "generates"
+
+    User {
+        String id PK
+        String clerkUserId UK "Clerk Auth ID"
+        String email UK
+        String name
+        String imageUrl
+        String industry FK "References IndustryInsight(industry)"
+        String bio
+        Int experience "Years of experience"
+        String_Array skills
+        DateTime createdAt
+        DateTime updatedAt
+    }
+
+    Assessment {
+        String id PK
+        String userId FK "References User(id)"
+        Float quizScore
+        Json_Array questions "Array of quiz Q&A items"
+        String category "Technical, Behavioral, etc."
+        String improvementTip "AI feedback snippet"
+        DateTime createdAt
+        DateTime updatedAt
+    }
+
+    Resume {
+        String id PK
+        String userId FK,UK "References User(id) - 1:1 constraint"
+        String content "Markdown text payload"
+        Float atsScore
+        String feedback
+        DateTime createdAt
+        DateTime updatedAt
+    }
+
+    CoverLetter {
+        String id PK
+        String userId FK "References User(id)"
+        String content "Markdown text payload"
+        String jobDescription
+        String companyName
+        String jobTitle
+        String status "draft | completed"
+        DateTime createdAt
+        DateTime updatedAt
+    }
+
+    IndustryInsight {
+        String id PK
+        String industry UK "Unique key e.g. tech-software-development"
+        Json_Array salaryRanges "Array of {role, min, max, median}"
+        Float growthRate
+        String demandLevel "High | Medium | Low"
+        String_Array topSkills
+        String marketOutlook "Positive | Neutral | Negative"
+        String_Array keyTrends
+        String_Array recommendedSkills
+        DateTime lastUpdated
+        DateTime nextUpdate
+    }
+```
+
+### Entity Dictionary & Key Attributes
+
+1. **`User` Entity**: Central actor in the system. Stores Clerk authentication mapping (`clerkUserId`), profile details (bio, experience level, skills array), and foreign keys linking candidates to industry market insights.
+2. **`Assessment` Entity**: Immutable records of candidate interview performance. Stores overall `quizScore`, structured JSON logs of all questions & user responses (`questions`), category classification, and AI-generated `improvementTip`.
+3. **`Resume` Entity**: Markdown-formatted user resume artifact for editing and scoring. Captures AI evaluation metadata including `atsScore` and structured actionable `feedback`. Strictly 1:1 linked per candidate.
+4. **`CoverLetter` Entity**: Tailored cover letter artifacts targeting specific applications. Stores `jobDescription`, `companyName`, `jobTitle`, workflow `status`, and generated markdown `content`.
+5. **`IndustryInsight` Entity**: Central analytics hub aggregating industry growth rates, demand levels, market outlook, key trends, and salary range breakdowns (`salaryRanges` JSON array) for domain-specific insights.
+
+### Relationships & Cardinalities Explained
+
+- **`IndustryInsight` to `User` (1 : N - One-to-Many, Optional)**:
+  - An `IndustryInsight` record can categorize multiple `User` profiles sharing that industry slug (`User.industry` foreign key -> `IndustryInsight.industry`).
+  - Optional on the `User` side to allow new user registration prior to selecting an industry sector.
+
+- **`User` to `Assessment` (1 : N - One-to-Many)**:
+  - A `User` can take multiple interview simulations over time. Each assessment belongs strictly to one user via `userId`.
+  - Indexed via `@@index([userId])` for rapid history loading on candidate dashboards.
+
+- **`User` to `Resume` (1 : 1 - One-to-One)**:
+  - Enforced by a `@unique` constraint on `Resume.userId`. Each candidate maintains exactly one master resume document within the platform.
+
+- **`User` to `CoverLetter` (1 : N - One-to-Many)**:
+  - Candidates can generate and store multiple cover letters for different applications (`companyName`, `jobTitle`).
+  - Indexed via `@@index([userId])` for fast candidate-specific retrieval.
+
+### Schema Design Rationales
+
+- **Hybrid Semi-Structured Architecture**: Incorporates PostgreSQL native `Json[]` arrays (`questions` in `Assessment` and `salaryRanges` in `IndustryInsight`). This avoids heavy relational multi-table joins while keeping complex structures easily queryable.
+- **Low-Latency Indexing**: Strategic single-column indexes (`@@index([userId])` and `@@index([industry])`) optimize response times for Server Actions and API routes under high concurrency.
+- **Generative AI Context Pipeline**: Historical performance data (`Assessment.improvementTip`) and industry metrics (`IndustryInsight`) are retrieved directly from the schema and injected into Google Gemini LLM prompt streams for context-aware content synthesis.
 
 ---
 
